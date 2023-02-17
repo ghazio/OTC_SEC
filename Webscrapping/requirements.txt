@@ -1,0 +1,5 @@
+#Selenium needs to have the chrome driver installed and it needs the path to do that
+selenium
+pandas
+numpy
+webdriver-manager
