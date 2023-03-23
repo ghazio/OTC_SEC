@@ -16,13 +16,12 @@ from selenium.webdriver.support.ui import WebDriverWait as wait
 from selenium.webdriver.chrome.options import Options
 from fake_useragent import UserAgent
 from random import randint
-import os, pdb, time, re
+import os, pdb, time, re, math
 import tabula as tb
 
 to_extract = "Annual Report"
 BASE = os.getcwd()
-DATA = os.getcwd() + '/downloaded_pdfs'
-print(DATA)
+DATA = os.getcwd()
 #If data does not exist, create a directory folder for storing the data
 if os.path.exists(DATA) == False:
     os.makedirs(DATA)
@@ -33,10 +32,11 @@ def get_links(ID,i,name_ids):
     Novalues = pd.DataFrame(columns = ['ID','Name','Reason'])
     options = Options()
     options.add_argument('--start-maximized')
-    #options.add_argument('--start-fullscreen')
+
+
     #if ID != 'CDSG':
     options.add_argument('--headless')
-    time.sleep(randint(1,1.5 * mp.cpu_count()-1))
+    time.sleep(randint(0,10))
     ua = UserAgent()
     userAgent = ua.random
     options.add_argument(f'user-agent={userAgent}')
@@ -48,15 +48,43 @@ def get_links(ID,i,name_ids):
     try:
         driver.get("https://www.otcmarkets.com/stock/"+ID+"/disclosure")
     except:
-        driver.implicitly_wait(100)
+        time.sleep(30)
         print(f"{ID} Did not load properly")
         driver.get("https://www.otcmarkets.com/stock/"+ID+"/disclosure")
-    driver.implicitly_wait(100)
-    #pdb.set_trace()
+    #s = datetime.now()
+    time.sleep(randint(30,50))
+    wait_count = 0
+    driver.execute_script("window.scrollTo(0, document.body.scrollHeight)")
+    while True:
+        try:
+            if wait_count > 50:
+                print(f"Screenshoted the {ID}, Access_Denied")
+                #add the information to Novalues table
+                Novalues.loc[len(Novalues.index)] = [ID,name_ids['Name'][i],'Access_denied']
+                driver.quit()
+                return None,Novalues
+            unavailable = driver.find_element(By.XPATH,"//*[contains(text(),\'Access Denied')]")
+            print(f"Access denied for {ID}, reloading")
+            driver.get("https://www.otcmarkets.com/stock/"+ID+"/disclosure")
+            wait_count += 1
+            driver.implicitly_wait(10)
+        except:
+            
+            break
     #check for access denied error
     #try:
      #   gives_erro
     #If page does not exist
+        #if the data was not loaded properly, try reloading the page(it happens for some pages)
+    while True:
+        try:
+            unavailable = driver.find_element(By.XPATH,"//*[contains(text(),\'unavailable')]").text
+            print(f"{unavailable} for {ID}, reloading")
+            driver.get("https://www.otcmarkets.com/stock/"+ID+"/disclosure")
+            driver.implicitly_wait(10)
+        except:
+            #print(f"{ID} Data loaded properly")
+            break
     
     try:
         page_exists = driver.find_element(By.XPATH,"//*[contains(text(),\'Page Not Found')]")
@@ -70,22 +98,10 @@ def get_links(ID,i,name_ids):
     except:
         #print("Page exists")
         pass
-    
-    #if the data was not loaded properly, try reloading the page(it happens for some pages)
-    while True:
-        try:
-            unavailable = driver.find_element(By.XPATH,"//*[contains(text(),\'Unavailable')]").text
-            print(f"{unavailable} for {ID}, reloading")
-            driver.get("https://www.otcmarkets.com/stock/"+ID+"/disclosure")
-            driver.implicitly_wait(100)
-        except:
-            #print("Data loaded properly")
-            break
 
     #Check if the main table has no submissions to OTC makets
     try:
         no_submissions = driver.find_element(By.XPATH,"//*[contains(text(),\'The company has not provided financial reports or other disclosures to OTC Markets Group')]")
-        #pdb.set_trace()
         driver.get_screenshot_as_file(BASE +"/"+ ID + "screenshot.png")
         print(f"Screenshoted the {ID}, No submissions")
         #add the information to Novalues table
@@ -95,22 +111,31 @@ def get_links(ID,i,name_ids):
     except:
         pass
         #print(f"{ID} submitted to the OTC markets")
-    
+    time.sleep(4)
     #Find the row that is displaying the number of rows
     totals = [element.text.split() for element in driver.find_elements(By.XPATH,"//*[(contains(text(),\'Displaying'))]")]
-           #(driver.find_elements(By.XPATH,"//*[(contains(text(),\'Disclosure & News'))]"))
-       #driver.find_elements(By.XPATH,"//*[(contains(text(),\'Displaying'))]"))
-    #pdb.set_trace()
-    #if
+
+    #if it contains Disclosure
     exists = False
     for i,sentence in enumerate(totals):
         if 'Disclosure' in sentence:
             exists = True
             index  = i
-    
+            break
+    #totals[index][3]
+        #print(ID,"Faulting with totals",totals)
+        #exit()
+    try:
+        totals[index][3]
+    except:
+        print(f"Screenshoted the {ID}, Indexing_error")
+        #add the information to Novalues table
+        Novalues.loc[len(Novalues.index)] = [ID,name_ids['Name'][i],'Indexing_error']
+        driver.quit()
+        return None,Novalues
     max = int(totals[index][3])
     cur = int(totals[index][1])
-    to_click = round((max-cur)/10)
+    to_click = math.ceil((max-cur)/10)
     """
     for i in range(to_click):
         axd = driver.find_elements(By.XPATH,"//*[contains(text(),\'More')]")
@@ -120,15 +145,31 @@ def get_links(ID,i,name_ids):
                 time.sleep(randint(10,15))
                 break"""
 
-    ac = ActionChains(driver)
     number_clicks = 0
-    while cur < max or number_clicks > 10 * to_click:
+    
+
+    #for click_attempt in range(100 * to_click):
+    while cur < max:
+        ac = ActionChains(driver)
         number_clicks += 1
+        if number_clicks > 100*10:
+            print(f"Breaking at {number_clicks} for {ID}")
+            break
+        #pdb.set_trace()
+        #if click_attempt % 25 == 0 and click_attempt >0:
+         #   driver.get("https://www.otcmarkets.com/stock/"+ID+"/disclosure")
+          #  time.sleep(20)
         axd = driver.find_elements(By.XPATH,"//*[contains(text(),\'More')]")
         for element in axd:
             if len(element.text) == 4:
-                ac.move_to_element(element).click().perform()
-                time.sleep(randint(20,40))
+                #ac.move_to_element(element).perform()
+                driver.execute_script("arguments[0].scrollIntoView(true);", element);
+                time.sleep(1)
+                try:
+                    ac.move_to_element(element).move_by_offset(1,10).click().perform()
+                except:
+                    print(f"{ID} could not click on {element.text}")
+                time.sleep(5)
                 break
         #cur += 10
         totals_new = [element.text.split() for element in (driver.find_elements(By.XPATH,"//*[contains(text(),\'Displaying')]"))]
@@ -137,10 +178,13 @@ def get_links(ID,i,name_ids):
             if 'Disclosure' in sentence and 'News' in sentence:
                 exists = True
                 index  = i
+                break
         cur = int(totals_new[index][1])
-    if number_clicks > 10 * to_click: print(f"{ID} could not load all {number_clicks} the possible clicks {to_click}")
+        del ac
+    if number_clicks > 100*10: print(f"{ID} could not load all {number_clicks}")
 
-                
+    time.sleep(2)
+
     rows_of_disclosure = driver.find_elements(By.XPATH, "//table/tbody/tr/td[2]/span/span/a")
     years_of_disclosure = driver.find_elements(By.XPATH, "//table/tbody/tr/td[1]/span/span")[0:len(rows_of_disclosure)]
 
@@ -171,12 +215,23 @@ def get_links(ID,i,name_ids):
         Novalues.loc[len(Novalues.index)] = [ID,name_ids['Name'][i],f'No {to_extract} files found']
         driver.quit()
         return None,Novalues
+    if cur < max and number_clicks > 100*10:
+        driver.get_screenshot_as_file(BASE +"/"+ ID + "screenshot.png")
+        print(f"Screenshoted the {ID}, could not find max rows found")
+        Novalues.loc[len(Novalues.index)] = [ID,name_ids['Name'][i],f'Not completely loaded']
     
     driver.quit()
     print(f"Done with {ID}, got {All_reports.shape} links {cur} out of {max}")
-    return All_reports,None
+    return All_reports,Novalues
 
-
+def get_links_run(ID,i,name_ids):
+    try:
+        return get_links(ID,i,name_ids)
+    except:
+        print(f"{ID} failed for some reason.")
+        Novalues = pd.DataFrame(columns = ['ID','Name','Reason'])
+        Novalues.loc[len(Novalues.index)] = [ID,name_ids['Name'][i],f'Unknown error']
+        return None,Novalues
 
 
 """
@@ -191,8 +246,9 @@ This is the part of the pipeline that takes in a list of promoted stocks on the 
     
 """
 import random
+from datetime import datetime
 if __name__ == '__main__':
-
+    s = datetime.now()
     #read in the Promoted Stocks file
     promoted_stocks = pd.read_csv('promoted_stocks.csv',low_memory=False,header=None)
     
@@ -202,23 +258,15 @@ if __name__ == '__main__':
     name_ids = name_ids.set_axis(['ID', 'Name'], axis='columns')
     All_reports = pd.DataFrame(columns = ['ID','Name','Report','Date','Year', 'Version','Link'])
     Novalues = pd.DataFrame(columns = ['ID','Name','Reason'])
-    #get_links('GEGP',1,name_ids)
-    #print(mp.cpu_count()-1)
-    pool = mp.Pool(mp.cpu_count()-1)
-    #for i,name in enumerate(['GEGP','PYXX','MXMG']):
-     #   print(f"Starting {name} {i}")
-      #  a,b = get_links(name,i,name_ids)
-       # All_reports.append(a)
-        #Novalues.append(b)
-    
-    #for each of the company in the data,
-    #random.shuffle(name_ids['ID'])
-    results = pool.starmap(get_links,zip(name_ids['ID'],range(len(name_ids)),repeat(name_ids)))
+    #get_links('GRCO',1,name_ids)
+    pool = mp.Pool(mp.cpu_count())
+    results = pool.starmap(get_links_run,zip(name_ids['ID'],range(len(name_ids)),repeat(name_ids)))
+    print(datetime.now()-s)
     const1, const2 = zip(*results)
     All_reports = pd.concat(const1)
     Novalues    = pd.concat(const2)
     
     #Save the results
-    All_reports.to_csv(DATA+'/metadata_final.csv')
-    Novalues.to_csv(DATA+'/Dropped_companies_final.csv')
+    All_reports.to_csv(DATA+'/metadata.csv')
+    Novalues.to_csv(DATA+'/Dropped_companies.csv')
 
